@@ -119,7 +119,7 @@ async function main() {
     console.log("");
     const configureOpenclaw = await confirm(rl, "Configure OpenClaw now?", true);
     if (configureOpenclaw) {
-      await configureOpenclawFlow(rl, serverUrl, apiKey);
+      await configureOpenclawFlow(rl, serverUrl, apiKey, privateKey, publicKeyBase64);
     }
 
     console.log("");
@@ -185,6 +185,86 @@ async function confirm(rl, question, defaultYes) {
   const answer = (await rl.question(`${question}${suffix}: `)).trim().toLowerCase();
   if (!answer) return defaultYes;
   return ["y", "yes"].includes(answer);
+}
+
+async function chooseModelId(rl, serverUrl, apiKey, privateKey, publicKeyBase64) {
+  const models = await fetchAvailableModels(serverUrl, apiKey, privateKey, publicKeyBase64);
+
+  if (!models.length) {
+    console.log("No models were returned by the server.");
+    return (await ask(rl, "Model ID to expose (leave blank to skip)", "")).trim();
+  }
+
+  console.log("");
+  console.log("Available models:");
+  models.forEach((model, index) => {
+    const label = model.name && model.name !== model.id ? `${model.id} (${model.name})` : model.id;
+    console.log(`  ${index + 1}. ${label}`);
+  });
+
+  while (true) {
+    const answer = (await ask(rl, `Select model (1-${models.length}, Enter to skip)`, "")).trim();
+    if (!answer) return "";
+    const index = Number(answer);
+    if (Number.isInteger(index) && index >= 1 && index <= models.length) {
+      return models[index - 1].id;
+    }
+    const matched = models.find((model) => model.id === answer);
+    if (matched) return matched.id;
+    console.log("Invalid selection. Try again.");
+  }
+}
+
+async function fetchAvailableModels(serverUrl, apiKey, privateKey, publicKeyBase64) {
+  const url = joinUrl(serverUrl, "/v1/models");
+  const headers = apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined;
+  let response = await fetchJson(url, { method: "GET", headers });
+
+  if (!response.ok && privateKey && publicKeyBase64) {
+    try {
+      const data = await signedJsonRequest(
+        serverUrl,
+        privateKey,
+        publicKeyBase64,
+        "GET",
+        "/v1/models"
+      );
+      return normalizeModelList(data);
+    } catch (error) {
+      response = { ok: false, data: error.message };
+    }
+  }
+
+  if (!response.ok) {
+    console.log(`Unable to fetch models: ${formatError(response.data)}`);
+    return [];
+  }
+
+  return normalizeModelList(response.data);
+}
+
+function normalizeModelList(data) {
+  if (!data) return [];
+  const raw = Array.isArray(data)
+    ? data
+    : Array.isArray(data.data)
+    ? data.data
+    : Array.isArray(data.models)
+    ? data.models
+    : [];
+
+  return raw
+    .map((item) => {
+      if (!item) return null;
+      if (typeof item === "string") return { id: item };
+      if (typeof item === "object") {
+        const id = item.id || item.model || item.name;
+        if (!id) return null;
+        return { id, name: item.name || item.display_name };
+      }
+      return null;
+    })
+    .filter(Boolean);
 }
 
 async function loadOrCreateKeys() {
@@ -333,20 +413,20 @@ function readJsonFile(filePath) {
   }
 }
 
-async function configureOpenclawFlow(rl, serverUrl, apiKey) {
+async function configureOpenclawFlow(rl, serverUrl, apiKey, privateKey, publicKeyBase64) {
   const provider = (await ask(rl, "OpenClaw provider name", "loyal")).trim() || "loyal";
-  const modelId = (await ask(rl, "Model ID to expose (required)", "")).trim();
+  const modelId = await chooseModelId(rl, serverUrl, apiKey, privateKey, publicKeyBase64);
   if (!modelId) {
     console.log("Skipping OpenClaw config (no model id provided).");
     return;
   }
-  const modelName = (await ask(rl, "Model display name", modelId)).trim() || modelId;
+  const modelName = "Loyal";
   const baseUrl = normalizeUrl(await ask(rl, "Base URL for provider", joinUrl(serverUrl, "/v1")));
-  const envVarName = (await ask(rl, "Env var name for API key", "LOYAL_API_KEY")).trim() || "LOYAL_API_KEY";
+  const envVarName = "LOYAL_API_KEY";
 
   if (!apiKey) {
     console.log("");
-    console.log("No API key was created during setup. You'll need to set it later.");
+    console.log(`No API key was created during setup. You'll need to set ${envVarName} later.`);
   }
 
   const wantEnvFile = await confirm(rl, `Write ${envVarName} to ${DEFAULT_OPENCLAW_ENV}?`, true);
@@ -387,12 +467,16 @@ async function configureWithOpenclawCli(
     : false;
   const apiKeyValue = useInlineKey ? apiKey : `\${${envVarName}}`;
 
-  await openclawConfigSet(`models.providers.${provider}.baseUrl`, baseUrl, false);
-  await openclawConfigSet(`models.providers.${provider}.apiKey`, apiKeyValue, false);
-  await openclawConfigSet(`models.providers.${provider}.api`, "openai-completions", false);
+  const providerConfig = {
+    baseUrl,
+    apiKey: apiKeyValue,
+    api: "openai-completions",
+    models: [{ id: modelId, name: modelName }],
+  };
+
   await openclawConfigSet(
-    `models.providers.${provider}.models`,
-    JSON.stringify([{ id: modelId, name: modelName }]),
+    `models.providers.${provider}`,
+    JSON.stringify(providerConfig),
     true
   );
 
