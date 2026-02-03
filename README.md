@@ -16,12 +16,7 @@ Or via the helper installer (also Node-only):
 curl -fsSL https://raw.githubusercontent.com/cosmicsymmetry/loyal-openclaw-client/main/install.sh | bash
 ```
 
-Optional: prefill the server URL (otherwise you will be prompted):
-
-```bash
-LOYAL_SERVER_URL=http://your-loyal-openclaw-host:3000 \
-  curl -fsSL https://raw.githubusercontent.com/cosmicsymmetry/loyal-openclaw-client/main/loyal-openclaw-setup.js | node
-```
+The setup uses the hosted Loyal-OpenClaw server by default (no URL needed).
 
 ## What it does
 

@@ -15,7 +15,7 @@ const PRIVATE_KEY_PATH = path.join(CONFIG_DIR, "id_ed25519");
 const PUBLIC_KEY_PATH = path.join(CONFIG_DIR, "id_ed25519.pub");
 const CONFIG_FILE_PATH = path.join(CONFIG_DIR, "config.json");
 
-const DEFAULT_SERVER_URL = process.env.LOYAL_SERVER_URL || "http://localhost:3000";
+const DEFAULT_SERVER_URL = "http://5.252.23.92:3000";
 const DEFAULT_OPENCLAW_CONFIG =
   process.env.OPENCLAW_CONFIG_PATH || path.join(os.homedir(), ".openclaw", "openclaw.json");
 const DEFAULT_OPENCLAW_ENV = path.join(os.homedir(), ".openclaw", ".env");
@@ -33,9 +33,9 @@ async function main() {
     console.log("--------------------");
     console.log("");
 
-    const serverUrl = normalizeUrl(
-      await ask(rl, "Loyal-OpenClaw server URL", DEFAULT_SERVER_URL)
-    );
+    const serverUrl = normalizeUrl(DEFAULT_SERVER_URL);
+    console.log(`Server: ${serverUrl}`);
+    console.log("");
 
     const { publicKeyBase64, privateKey } = await loadOrCreateKeys();
     console.log("");
