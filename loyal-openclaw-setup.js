@@ -26,7 +26,7 @@ async function main() {
     process.exit(1);
   }
 
-  const rl = readline.createInterface({ input: stdin, output: stdout });
+  const { rl, close } = createInteractiveInterface();
 
   try {
     console.log("Loyal OpenClaw Setup");
@@ -134,6 +134,7 @@ async function main() {
     process.exitCode = 1;
   } finally {
     rl.close();
+    close();
   }
 }
 
@@ -150,6 +151,33 @@ async function ask(rl, question, defaultValue) {
   const answer = await rl.question(`${question}${suffix}: `);
   const trimmed = answer.trim();
   return trimmed || defaultValue || "";
+}
+
+function createInteractiveInterface() {
+  let input = stdin;
+  let output = stdout;
+  let needsClose = false;
+
+  if (!stdin.isTTY && fs.existsSync("/dev/tty")) {
+    try {
+      input = fs.createReadStream("/dev/tty");
+      output = fs.createWriteStream("/dev/tty");
+      needsClose = true;
+    } catch {
+      input = stdin;
+      output = stdout;
+    }
+  }
+
+  const rl = readline.createInterface({ input, output });
+  const close = () => {
+    if (needsClose) {
+      input.destroy();
+      output.end();
+    }
+  };
+
+  return { rl, close };
 }
 
 async function confirm(rl, question, defaultYes) {
