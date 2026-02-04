@@ -16,6 +16,8 @@ const PUBLIC_KEY_PATH = path.join(CONFIG_DIR, "id_ed25519.pub");
 const CONFIG_FILE_PATH = path.join(CONFIG_DIR, "config.json");
 
 const DEFAULT_SERVER_URL = "http://5.252.23.92:3000";
+const DEFAULT_PROVIDER = "Loyal";
+const DEFAULT_ENV_VAR = "LOYAL_API_KEY";
 const DEFAULT_OPENCLAW_CONFIG =
   process.env.OPENCLAW_CONFIG_PATH || path.join(os.homedir(), ".openclaw", "openclaw.json");
 const DEFAULT_OPENCLAW_ENV = path.join(os.homedir(), ".openclaw", ".env");
@@ -32,6 +34,17 @@ async function main() {
     console.log("Loyal OpenClaw Setup");
     console.log("--------------------");
     console.log("");
+    console.log("This setup updates OpenClaw and Loyal config files (fully reversible).");
+    console.log("It will create/update:");
+    console.log(`  Loyal keys + config: ${CONFIG_DIR}`);
+    console.log(
+      `  OpenClaw config: ${DEFAULT_OPENCLAW_CONFIG} (or via the OpenClaw CLI, if installed)`
+    );
+    console.log(`  OpenClaw env: ${DEFAULT_OPENCLAW_ENV} (${DEFAULT_ENV_VAR})`);
+    console.log(
+      "Revert anytime by removing the Loyal provider entries and env var, or deleting the Loyal config directory."
+    );
+    console.log("");
 
     const localConfig = readJsonFile(CONFIG_FILE_PATH) || {};
     if (hasExistingSetup()) {
@@ -45,13 +58,7 @@ async function main() {
         const privateKey = keys?.privateKey || null;
         const publicKeyBase64 = keys?.publicKeyBase64 || null;
         console.log("");
-        await updateOpenclawModelsFlow(
-          rl,
-          serverUrl,
-          apiKey,
-          privateKey,
-          publicKeyBase64
-        );
+        await updateOpenclawModelsFlow(serverUrl, apiKey, privateKey, publicKeyBase64);
         console.log("");
         console.log("Update complete.");
         return;
@@ -88,52 +95,47 @@ async function main() {
       console.log(`OK: ${walletInfo.message}`);
     }
 
-    const showDeposit = await confirm(rl, "Show deposit instructions now?", true);
-    if (showDeposit) {
-      try {
-        const depositInfo = await signedJsonRequest(
-          serverUrl,
-          privateKey,
-          publicKeyBase64,
-          "GET",
-          "/v1/deposit"
-        );
-        console.log("");
-        console.log("Deposit Instructions");
-        console.log("--------------------");
-        console.log(`Network:  ${depositInfo.network}`);
-        console.log(`Currency: ${depositInfo.currency}`);
-        console.log(`Deposit:  ${depositInfo.deposit_wallet}`);
-        if (depositInfo.your_wallet) {
-          console.log(`From:     ${depositInfo.your_wallet}`);
-        }
-        console.log("");
-        console.log(depositInfo.instructions);
-        console.log("");
-        console.log(`Note: ${depositInfo.note}`);
-      } catch (error) {
-        console.log("");
-        console.log(`Deposit info unavailable: ${error.message}`);
-      }
-    }
-
-    const createKey = await confirm(rl, "Create a Bearer API key now?", true);
-    let apiKey = null;
-    if (createKey) {
-      const apiKeyInfo = await signedJsonRequest(
+    try {
+      const depositInfo = await signedJsonRequest(
         serverUrl,
         privateKey,
         publicKeyBase64,
-        "POST",
-        "/v1/api-keys"
+        "GET",
+        "/v1/deposit"
       );
-      apiKey = apiKeyInfo.api_key;
       console.log("");
-      console.log("API Key (Bearer):");
-      console.log(apiKey);
+      console.log("Deposit Instructions");
+      console.log("--------------------");
+      console.log(`Network:  ${depositInfo.network}`);
+      console.log(`Currency: ${depositInfo.currency}`);
+      console.log(`Deposit:  ${depositInfo.deposit_wallet}`);
+      if (depositInfo.your_wallet) {
+        console.log(`From:     ${depositInfo.your_wallet}`);
+      }
       console.log("");
-      console.log("Note: This key is only shown once.");
+      console.log(depositInfo.instructions);
+      console.log("");
+      console.log(`Note: ${depositInfo.note}`);
+    } catch (error) {
+      console.log("");
+      console.log(`Deposit info unavailable: ${error.message}`);
     }
+
+    let apiKey = null;
+    const apiKeyInfo = await signedJsonRequest(
+      serverUrl,
+      privateKey,
+      publicKeyBase64,
+      "POST",
+      "/v1/api-keys"
+    );
+    apiKey = apiKeyInfo.api_key;
+    console.log("");
+    console.log("OK: Created Bearer API key.");
+    console.log("API Key (Bearer):");
+    console.log(apiKey);
+    console.log("");
+    console.log("Note: This key is only shown once.");
 
     if (apiKey) {
       await saveLocalConfig({ server_url: serverUrl, api_key: apiKey });
@@ -143,17 +145,10 @@ async function main() {
     }
 
     console.log("");
-    const configureOpenclaw = await confirm(rl, "Configure OpenClaw now?", true);
-    if (configureOpenclaw) {
-      await configureOpenclawFlow(rl, serverUrl, apiKey, privateKey, publicKeyBase64);
-    }
+    await configureOpenclawFlow(rl, serverUrl, apiKey, privateKey, publicKeyBase64);
 
     console.log("");
     console.log("Setup complete.");
-    console.log("Next steps:");
-    console.log(`  1. Export OPENAI_API_BASE=${joinUrl(serverUrl, "/v1")}`);
-    console.log("  2. Export OPENAI_API_KEY=<your_loyal_api_key>");
-    console.log("  3. Use your OpenAI client or OpenClaw provider config");
   } catch (error) {
     console.error("");
     console.error("Setup failed:", error.message);
@@ -212,13 +207,6 @@ function createInteractiveInterface() {
   };
 
   return { rl, close };
-}
-
-async function confirm(rl, question, defaultYes) {
-  const suffix = defaultYes ? " [Y/n]" : " [y/N]";
-  const answer = (await rl.question(`${question}${suffix}: `)).trim().toLowerCase();
-  if (!answer) return defaultYes;
-  return ["y", "yes"].includes(answer);
 }
 
 async function chooseSetupMode(rl) {
@@ -488,45 +476,36 @@ function readJsonFile(filePath) {
 }
 
 async function configureOpenclawFlow(rl, serverUrl, apiKey, privateKey, publicKeyBase64) {
-  const provider = (await ask(rl, "OpenClaw provider name", "loyal")).trim() || "loyal";
+  const provider = DEFAULT_PROVIDER;
   const modelId = await chooseModelId(rl, serverUrl, apiKey, privateKey, publicKeyBase64);
   if (!modelId) {
     console.log("Skipping OpenClaw config (no model id provided).");
     return;
   }
   const modelName = "Loyal";
-  const baseUrl = normalizeUrl(await ask(rl, "Base URL for provider", joinUrl(serverUrl, "/v1")));
-  const envVarName = "LOYAL_API_KEY";
+  const baseUrl = joinUrl(serverUrl, "/v1");
+  const envVarName = DEFAULT_ENV_VAR;
 
   if (!apiKey) {
     console.log("");
     console.log(`No API key was created during setup. You'll need to set ${envVarName} later.`);
-  }
-
-  const wantEnvFile = await confirm(rl, `Write ${envVarName} to ${DEFAULT_OPENCLAW_ENV}?`, true);
-  if (wantEnvFile && apiKey) {
+  } else {
     await upsertEnvVar(DEFAULT_OPENCLAW_ENV, envVarName, apiKey);
     console.log(`OK: Wrote ${envVarName} to ${DEFAULT_OPENCLAW_ENV}`);
   }
 
   if (isOpenclawInstalled()) {
     console.log("Configuring OpenClaw via CLI...");
-    await configureWithOpenclawCli(rl, provider, modelId, modelName, baseUrl, envVarName, apiKey);
+    await configureWithOpenclawCli(provider, modelId, modelName, baseUrl, envVarName, apiKey);
     return;
   }
 
   console.log("OpenClaw CLI not found. Trying direct config file edit...");
-  await configureWithConfigFile(rl, provider, modelId, modelName, baseUrl, envVarName, apiKey);
+  await configureWithConfigFile(provider, modelId, modelName, baseUrl, envVarName, apiKey);
 }
 
-async function updateOpenclawModelsFlow(
-  rl,
-  serverUrl,
-  apiKey,
-  privateKey,
-  publicKeyBase64
-) {
-  const provider = (await ask(rl, "OpenClaw provider name", "loyal")).trim() || "loyal";
+async function updateOpenclawModelsFlow(serverUrl, apiKey, privateKey, publicKeyBase64) {
+  const provider = DEFAULT_PROVIDER;
   const models = await fetchAvailableModels(serverUrl, apiKey, privateKey, publicKeyBase64);
   if (!models.length) {
     console.log("No models were returned by the server. Skipping OpenClaw updates.");
@@ -547,7 +526,7 @@ async function updateOpenclawModelsFlow(
   }
 
   console.log("OpenClaw CLI not found. Trying direct config file edit...");
-  await updateModelsInConfigFile(rl, provider, providerModels);
+  await updateModelsInConfigFile(provider, providerModels);
 }
 
 function isOpenclawInstalled() {
@@ -559,7 +538,6 @@ function isOpenclawInstalled() {
 }
 
 async function configureWithOpenclawCli(
-  rl,
   provider,
   modelId,
   modelName,
@@ -567,10 +545,7 @@ async function configureWithOpenclawCli(
   envVarName,
   apiKey
 ) {
-  const useInlineKey = apiKey
-    ? await confirm(rl, "Store API key directly in OpenClaw config?", false)
-    : false;
-  const apiKeyValue = useInlineKey ? apiKey : `\${${envVarName}}`;
+  const apiKeyValue = apiKey || `\${${envVarName}}`;
 
   const providerConfig = {
     baseUrl,
@@ -584,37 +559,29 @@ async function configureWithOpenclawCli(
     JSON.stringify(providerConfig),
     true
   );
-
-  const setPrimary = await confirm(
-    rl,
-    `Set agents.defaults.model.primary to ${provider}/${modelId}?`,
-    true
-  );
-  if (setPrimary) {
-    await openclawConfigSet(
-      "agents.defaults.model.primary",
-      `${provider}/${modelId}`,
-      false
-    );
+  if (apiKey) {
+    console.log(`OK: Stored ${provider} API key directly in OpenClaw config.`);
+  } else {
+    console.log(`OK: Configured ${provider} API key to use ${envVarName}.`);
   }
+  console.log(`OK: Set models.providers.${provider}.baseUrl to ${baseUrl}`);
 
-  const setAllowlist = await confirm(
-    rl,
-    `Add ${provider}/${modelId} to agents.defaults.models allowlist?`,
+  await openclawConfigSet(
+    "agents.defaults.model.primary",
+    `${provider}/${modelId}`,
     false
   );
-  if (setAllowlist) {
-    await openclawConfigSet(
-      `agents.defaults.models["${provider}/${modelId}"]`,
-      "{}",
-      true
-    );
-  }
+  console.log(`OK: Set agents.defaults.model.primary to ${provider}/${modelId}`);
 
-  const setMode = await confirm(rl, "Set models.mode to \"merge\"?", true);
-  if (setMode) {
-    await openclawConfigSet("models.mode", "merge", false);
-  }
+  await openclawConfigSet(
+    `agents.defaults.models["${provider}/${modelId}"]`,
+    "{}",
+    true
+  );
+  console.log(`OK: Added ${provider}/${modelId} to agents.defaults.models allowlist`);
+
+  await openclawConfigSet("models.mode", "merge", false);
+  console.log('OK: Set models.mode to "merge"');
 
   console.log("OK: OpenClaw config updated.");
   console.log("Restart the OpenClaw gateway to apply changes.");
@@ -635,7 +602,6 @@ async function openclawConfigSet(pathKey, value, asJson) {
 }
 
 async function configureWithConfigFile(
-  rl,
   provider,
   modelId,
   modelName,
@@ -643,7 +609,7 @@ async function configureWithConfigFile(
   envVarName,
   apiKey
 ) {
-  const configPath = (await ask(rl, "OpenClaw config path", DEFAULT_OPENCLAW_CONFIG)).trim();
+  const configPath = DEFAULT_OPENCLAW_CONFIG;
   if (!configPath) {
     console.log("Skipping OpenClaw config (no config path provided).");
     return;
@@ -661,51 +627,39 @@ async function configureWithConfigFile(
   config.models.providers = config.models.providers || {};
   config.models.providers[provider] = config.models.providers[provider] || {};
   config.models.providers[provider].baseUrl = baseUrl;
-  config.models.providers[provider].apiKey = `\${${envVarName}}`;
+  config.models.providers[provider].apiKey = apiKey || `\${${envVarName}}`;
   config.models.providers[provider].api = "openai-completions";
   config.models.providers[provider].models = [{ id: modelId, name: modelName }];
 
-  const setPrimary = await confirm(
-    rl,
-    `Set agents.defaults.model.primary to ${provider}/${modelId}?`,
-    true
-  );
-  if (setPrimary) {
-    config.agents = config.agents || {};
-    config.agents.defaults = config.agents.defaults || {};
-    config.agents.defaults.model = config.agents.defaults.model || {};
-    config.agents.defaults.model.primary = `${provider}/${modelId}`;
-  }
+  config.agents = config.agents || {};
+  config.agents.defaults = config.agents.defaults || {};
+  config.agents.defaults.model = config.agents.defaults.model || {};
+  config.agents.defaults.model.primary = `${provider}/${modelId}`;
 
-  const setAllowlist = await confirm(
-    rl,
-    `Add ${provider}/${modelId} to agents.defaults.models allowlist?`,
-    false
-  );
-  if (setAllowlist) {
-    config.agents = config.agents || {};
-    config.agents.defaults = config.agents.defaults || {};
-    config.agents.defaults.models = config.agents.defaults.models || {};
-    config.agents.defaults.models[`${provider}/${modelId}`] = {};
-  }
+  config.agents.defaults.models = config.agents.defaults.models || {};
+  config.agents.defaults.models[`${provider}/${modelId}`] = {};
 
-  config.models.mode = config.models.mode || "merge";
+  config.models.mode = "merge";
 
   await ensureDir(path.dirname(configPath), 0o700);
   await fsp.writeFile(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
   await fsp.chmod(configPath, 0o600);
 
-  if (apiKey) {
-    await upsertEnvVar(DEFAULT_OPENCLAW_ENV, envVarName, apiKey);
-    console.log(`OK: Wrote ${envVarName} to ${DEFAULT_OPENCLAW_ENV}`);
-  }
-
   console.log(`OK: Updated ${configPath}`);
+  console.log(`OK: Set models.providers.${provider}.baseUrl to ${baseUrl}`);
+  if (apiKey) {
+    console.log(`OK: Stored ${provider} API key directly in ${configPath}`);
+  } else {
+    console.log(`OK: Configured ${provider} API key to use ${envVarName}.`);
+  }
+  console.log(`OK: Set agents.defaults.model.primary to ${provider}/${modelId}`);
+  console.log(`OK: Added ${provider}/${modelId} to agents.defaults.models allowlist`);
+  console.log('OK: Set models.mode to "merge"');
   console.log("Restart the OpenClaw gateway to apply changes.");
 }
 
-async function updateModelsInConfigFile(rl, provider, providerModels) {
-  const configPath = (await ask(rl, "OpenClaw config path", DEFAULT_OPENCLAW_CONFIG)).trim();
+async function updateModelsInConfigFile(provider, providerModels) {
+  const configPath = DEFAULT_OPENCLAW_CONFIG;
   if (!configPath) {
     console.log("Skipping OpenClaw config update (no config path provided).");
     return;
