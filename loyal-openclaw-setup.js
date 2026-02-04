@@ -33,7 +33,33 @@ async function main() {
     console.log("--------------------");
     console.log("");
 
-    const serverUrl = normalizeUrl(DEFAULT_SERVER_URL);
+    const localConfig = readJsonFile(CONFIG_FILE_PATH) || {};
+    if (hasExistingSetup()) {
+      console.log(`Detected existing Loyal setup in ${CONFIG_DIR}.`);
+      const setupMode = await chooseSetupMode(rl);
+      if (setupMode === "update-models") {
+        const defaultServer = localConfig.server_url || DEFAULT_SERVER_URL;
+        const serverUrl = normalizeUrl(await ask(rl, "Server URL", defaultServer));
+        const apiKey = localConfig.api_key || null;
+        const keys = await loadExistingKeys();
+        const privateKey = keys?.privateKey || null;
+        const publicKeyBase64 = keys?.publicKeyBase64 || null;
+        console.log("");
+        await updateOpenclawModelsFlow(
+          rl,
+          serverUrl,
+          apiKey,
+          privateKey,
+          publicKeyBase64
+        );
+        console.log("");
+        console.log("Update complete.");
+        return;
+      }
+      console.log("");
+    }
+
+    const serverUrl = normalizeUrl(localConfig.server_url || DEFAULT_SERVER_URL);
     console.log(`Server: ${serverUrl}`);
     console.log("");
 
@@ -146,6 +172,14 @@ function normalizeUrl(url) {
   return trimmed;
 }
 
+function hasExistingSetup() {
+  return (
+    fs.existsSync(CONFIG_FILE_PATH) ||
+    fs.existsSync(PRIVATE_KEY_PATH) ||
+    fs.existsSync(PUBLIC_KEY_PATH)
+  );
+}
+
 async function ask(rl, question, defaultValue) {
   const suffix = defaultValue ? ` [${defaultValue}]` : "";
   const answer = await rl.question(`${question}${suffix}: `);
@@ -185,6 +219,18 @@ async function confirm(rl, question, defaultYes) {
   const answer = (await rl.question(`${question}${suffix}: `)).trim().toLowerCase();
   if (!answer) return defaultYes;
   return ["y", "yes"].includes(answer);
+}
+
+async function chooseSetupMode(rl) {
+  console.log("Existing setup detected. What would you like to do?");
+  console.log("  1. Configure everything from the beginning");
+  console.log("  2. Update OpenClaw provider models list only");
+  while (true) {
+    const answer = (await ask(rl, "Select 1 or 2", "2")).trim();
+    if (answer === "1") return "full";
+    if (answer === "2") return "update-models";
+    console.log("Please enter 1 or 2.");
+  }
 }
 
 async function chooseModelId(rl, serverUrl, apiKey, privateKey, publicKeyBase64) {
@@ -267,6 +313,20 @@ function normalizeModelList(data) {
     .filter(Boolean);
 }
 
+function buildProviderModels(models) {
+  const seen = new Set();
+  return models
+    .map((model) => ({
+      id: model.id,
+      name: model.name || model.id,
+    }))
+    .filter((model) => {
+      if (!model.id || seen.has(model.id)) return false;
+      seen.add(model.id);
+      return true;
+    });
+}
+
 async function loadOrCreateKeys() {
   await ensureDir(CONFIG_DIR, 0o700);
 
@@ -285,6 +345,20 @@ async function loadOrCreateKeys() {
   }
 
   return { privateKey, publicKeyBase64 };
+}
+
+async function loadExistingKeys() {
+  if (!fs.existsSync(PRIVATE_KEY_PATH)) return null;
+  try {
+    const privateKeyPem = await fsp.readFile(PRIVATE_KEY_PATH, "utf-8");
+    const privateKey = crypto.createPrivateKey(privateKeyPem);
+    const publicKey = crypto.createPublicKey(privateKey);
+    const publicKeyBase64 = extractPublicKeyBase64(publicKey);
+    return { privateKey, publicKeyBase64 };
+  } catch (error) {
+    console.log(`Warning: Failed to load existing keys: ${error.message}`);
+    return null;
+  }
 }
 
 async function generateKeys() {
@@ -445,6 +519,37 @@ async function configureOpenclawFlow(rl, serverUrl, apiKey, privateKey, publicKe
   await configureWithConfigFile(rl, provider, modelId, modelName, baseUrl, envVarName, apiKey);
 }
 
+async function updateOpenclawModelsFlow(
+  rl,
+  serverUrl,
+  apiKey,
+  privateKey,
+  publicKeyBase64
+) {
+  const provider = (await ask(rl, "OpenClaw provider name", "loyal")).trim() || "loyal";
+  const models = await fetchAvailableModels(serverUrl, apiKey, privateKey, publicKeyBase64);
+  if (!models.length) {
+    console.log("No models were returned by the server. Skipping OpenClaw updates.");
+    return;
+  }
+  const providerModels = buildProviderModels(models);
+
+  if (isOpenclawInstalled()) {
+    console.log("Updating OpenClaw via CLI...");
+    await openclawConfigSet(
+      `models.providers.${provider}.models`,
+      JSON.stringify(providerModels),
+      true
+    );
+    console.log("OK: OpenClaw model list updated.");
+    console.log("Restart the OpenClaw gateway to apply changes.");
+    return;
+  }
+
+  console.log("OpenClaw CLI not found. Trying direct config file edit...");
+  await updateModelsInConfigFile(rl, provider, providerModels);
+}
+
 function isOpenclawInstalled() {
   const result = spawnSync("openclaw", ["config", "get", "gateway.port"], {
     stdio: "ignore",
@@ -594,6 +699,34 @@ async function configureWithConfigFile(
     await upsertEnvVar(DEFAULT_OPENCLAW_ENV, envVarName, apiKey);
     console.log(`OK: Wrote ${envVarName} to ${DEFAULT_OPENCLAW_ENV}`);
   }
+
+  console.log(`OK: Updated ${configPath}`);
+  console.log("Restart the OpenClaw gateway to apply changes.");
+}
+
+async function updateModelsInConfigFile(rl, provider, providerModels) {
+  const configPath = (await ask(rl, "OpenClaw config path", DEFAULT_OPENCLAW_CONFIG)).trim();
+  if (!configPath) {
+    console.log("Skipping OpenClaw config update (no config path provided).");
+    return;
+  }
+
+  const existing = readJsonFile(configPath);
+  if (!existing && fs.existsSync(configPath)) {
+    console.log("Existing config is not valid JSON. Skipping automatic edits.");
+    console.log("Use the OpenClaw CLI (openclaw config set) or edit manually.");
+    return;
+  }
+
+  const config = existing || {};
+  config.models = config.models || {};
+  config.models.providers = config.models.providers || {};
+  config.models.providers[provider] = config.models.providers[provider] || {};
+  config.models.providers[provider].models = providerModels;
+
+  await ensureDir(path.dirname(configPath), 0o700);
+  await fsp.writeFile(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
+  await fsp.chmod(configPath, 0o600);
 
   console.log(`OK: Updated ${configPath}`);
   console.log("Restart the OpenClaw gateway to apply changes.");
