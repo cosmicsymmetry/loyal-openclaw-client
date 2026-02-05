@@ -1,6 +1,31 @@
-# loyal-openclaw-client
+# Loyal OpenClaw Client
 
-Public, Node-only setup script for Loyal-OpenClaw users.
+Private OpenClaw integration that runs in a Trusted Execution Environment (TEE).
+
+This repo provides a public, Node-only setup script for Loyal-OpenClaw users. It is designed for fully private usage: keys and sensitive data are isolated inside a TEE, so only the enclave can access them.
+
+## Why use this integration
+
+- **Fully private by design.** Secrets are confined to a hardware-backed TEE, not exposed to the host OS or other processes.
+- **Confidential computing.** Workloads run in an isolated enclave that protects data in use.
+- **Simple setup.** One command to register keys, create an API key, and configure OpenClaw.
+
+## What is a TEE
+
+A Trusted Execution Environment (TEE) is a hardware-backed, isolated area of a CPU that runs code and stores data in a protected enclave. The isolation prevents the host operating system, hypervisor, and other applications from reading or tampering with what runs inside the TEE.
+
+In practice, a TEE provides:
+
+- **Isolation.** Code and data are separated from the rest of the machine.
+- **Confidentiality.** Data remains encrypted and inaccessible outside the enclave.
+- **Integrity.** The enclave helps ensure code and data are not modified by external software.
+
+## How it works
+
+1. You run the setup script locally.
+2. A keypair is generated or reused and your public key is registered.
+3. The Loyal-OpenClaw service runs inside a TEE, keeping private data accessible only within the enclave.
+4. You receive deposit instructions and a one-time API key for OpenClaw configuration.
 
 ## One-liner setup (recommended)
 
