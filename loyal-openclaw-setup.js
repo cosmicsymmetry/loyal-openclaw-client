@@ -112,12 +112,8 @@ async function main() {
     console.log("");
     console.log("Note: This key is only shown once.");
 
-    if (apiKey) {
-      await saveLocalConfig({ server_url: serverUrl, api_key: apiKey });
-      console.log(`Stored locally in ${CONFIG_FILE_PATH}`);
-    } else {
-      await saveLocalConfig({ server_url: serverUrl });
-    }
+    await saveLocalConfig({ server_url: serverUrl });
+    console.log(`Stored server URL in ${CONFIG_FILE_PATH} (API key not stored here).`);
 
     console.log("");
     await configureOpenclawFlow(rl, serverUrl, apiKey, privateKey, publicKeyBase64);
@@ -596,6 +592,9 @@ async function saveLocalConfig(update) {
   await ensureDir(CONFIG_DIR, 0o700);
   const current = readJsonFile(CONFIG_FILE_PATH) || {};
   const next = { ...current, ...update };
+  if (!Object.prototype.hasOwnProperty.call(update, "api_key")) {
+    delete next.api_key;
+  }
   await fsp.writeFile(CONFIG_FILE_PATH, JSON.stringify(next, null, 2), { mode: 0o600 });
   await fsp.chmod(CONFIG_FILE_PATH, 0o600);
 }
@@ -636,6 +635,9 @@ async function configureOpenclawFlow(rl, serverUrl, apiKey, privateKey, publicKe
   }
 
   console.log("OpenClaw CLI not found. Trying direct config file edit...");
+  if (apiKey) {
+    console.log(`Note: This will store your API key in ${DEFAULT_OPENCLAW_CONFIG}.`);
+  }
   await configureWithConfigFile(provider, modelId, modelName, baseUrl, envVarName, apiKey);
 }
 

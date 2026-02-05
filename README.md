@@ -10,12 +10,6 @@ Requires Node.js 18+.
 curl -fsSL https://raw.githubusercontent.com/cosmicsymmetry/loyal-openclaw-client/main/loyal-openclaw-setup.js | node
 ```
 
-Or via the helper installer (also Node-only):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/cosmicsymmetry/loyal-openclaw-client/main/install.sh | bash
-```
-
 The setup uses the hosted Loyal-OpenClaw server by default (no URL needed).
 
 ## What it does
@@ -33,18 +27,18 @@ The setup uses the hosted Loyal-OpenClaw server by default (no URL needed).
 ~/.loyal-openclaw/
 ├── id_ed25519      # Private key (PEM)
 ├── id_ed25519.pub  # Public key (base64)
-└── config.json     # server_url, api_key
+└── config.json     # server_url
 ```
 
 ```
 ~/.openclaw/
-├── openclaw.json   # Provider config updates (if OpenClaw CLI isn't used)
+├── openclaw.json   # Provider config updates (includes API key if OpenClaw CLI isn't used)
 └── .env            # LOYAL_API_KEY
 ```
 
 ## Notes
 
 - This script uses Node only (no Bun required).
-- The Bearer API key is shown once and stored locally.
+- The Bearer API key is shown once. It's stored in OpenClaw config/.env if you configure OpenClaw.
 - OpenClaw changes are reversible by removing the Loyal provider entries and LOYAL_API_KEY.
 - Rerunning the setup when a configuration already exists lets you check balance and view the deposit address.
