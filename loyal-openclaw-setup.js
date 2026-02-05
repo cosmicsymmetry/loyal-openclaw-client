@@ -63,6 +63,18 @@ async function main() {
         console.log("Update complete.");
         return;
       }
+      if (setupMode === "check-balance") {
+        const serverUrl = normalizeUrl(localConfig.server_url || DEFAULT_SERVER_URL);
+        const apiKey = localConfig.api_key || null;
+        const keys = await loadExistingKeys();
+        const privateKey = keys?.privateKey || null;
+        const publicKeyBase64 = keys?.publicKeyBase64 || null;
+        console.log("");
+        await showBalanceAndDeposit(serverUrl, apiKey, privateKey, publicKeyBase64);
+        console.log("");
+        console.log("Done.");
+        return;
+      }
       console.log("");
     }
 
@@ -82,46 +94,9 @@ async function main() {
     console.log(`OK: ${registerInfo.message}`);
     console.log(`  User ID: ${registerInfo.user.id}`);
 
-    const wallet = (await ask(rl, "Solana wallet for deposits (leave blank to skip)", "")).trim();
-    if (wallet) {
-      const walletInfo = await signedJsonRequest(
-        serverUrl,
-        privateKey,
-        publicKeyBase64,
-        "POST",
-        "/v1/wallet",
-        { solana_wallet: wallet }
-      );
-      console.log(`OK: ${walletInfo.message}`);
-    }
-
-    try {
-      const depositInfo = await signedJsonRequest(
-        serverUrl,
-        privateKey,
-        publicKeyBase64,
-        "GET",
-        "/v1/deposit"
-      );
-      console.log("");
-      console.log("Deposit Instructions");
-      console.log("--------------------");
-      console.log(`Network:  ${depositInfo.network}`);
-      console.log(`Currency: ${depositInfo.currency}`);
-      console.log(`Deposit:  ${depositInfo.deposit_wallet}`);
-      if (depositInfo.your_wallet) {
-        console.log(`From:     ${depositInfo.your_wallet}`);
-      }
-      console.log("");
-      console.log(depositInfo.instructions);
-      console.log("");
-      console.log(`Note: ${depositInfo.note}`);
-    } catch (error) {
-      console.log("");
-      console.log(`Deposit info unavailable: ${error.message}`);
-    }
-
     let apiKey = null;
+    await showDepositInfo(serverUrl, apiKey, privateKey, publicKeyBase64);
+
     const apiKeyInfo = await signedJsonRequest(
       serverUrl,
       privateKey,
@@ -213,11 +188,13 @@ async function chooseSetupMode(rl) {
   console.log("Existing setup detected. What would you like to do?");
   console.log("  1. Configure everything from the beginning");
   console.log("  2. Update OpenClaw provider models list only");
+  console.log("  3. Check balance and deposit address");
   while (true) {
-    const answer = (await ask(rl, "Select 1 or 2", "2")).trim();
+    const answer = (await ask(rl, "Select 1, 2, or 3", "2")).trim();
     if (answer === "1") return "full";
     if (answer === "2") return "update-models";
-    console.log("Please enter 1 or 2.");
+    if (answer === "3") return "check-balance";
+    console.log("Please enter 1, 2, or 3.");
   }
 }
 
@@ -275,6 +252,164 @@ async function fetchAvailableModels(serverUrl, apiKey, privateKey, publicKeyBase
   }
 
   return normalizeModelList(response.data);
+}
+
+async function fetchBalanceInfo(serverUrl, apiKey, privateKey, publicKeyBase64) {
+  if (privateKey && publicKeyBase64) {
+    try {
+      return await signedJsonRequest(serverUrl, privateKey, publicKeyBase64, "GET", "/v1/balance");
+    } catch (error) {
+      if (!apiKey) throw error;
+    }
+  }
+
+  if (apiKey) {
+    const url = joinUrl(serverUrl, "/v1/balance");
+    const response = await fetchJson(url, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (!response.ok) {
+      throw new Error(formatError(response.data));
+    }
+    return response.data;
+  }
+
+  throw new Error("No authentication available for balance check.");
+}
+
+async function fetchDepositInfo(serverUrl, apiKey, privateKey, publicKeyBase64) {
+  if (privateKey && publicKeyBase64) {
+    try {
+      return await signedJsonRequest(serverUrl, privateKey, publicKeyBase64, "GET", "/v1/deposit");
+    } catch (error) {
+      if (!apiKey) throw error;
+    }
+  }
+
+  if (apiKey) {
+    const url = joinUrl(serverUrl, "/v1/deposit");
+    const response = await fetchJson(url, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (!response.ok) {
+      throw new Error(formatError(response.data));
+    }
+    return response.data;
+  }
+
+  throw new Error("No authentication available for deposit info.");
+}
+
+async function showBalanceInfo(serverUrl, apiKey, privateKey, publicKeyBase64) {
+  try {
+    const balanceInfo = await fetchBalanceInfo(serverUrl, apiKey, privateKey, publicKeyBase64);
+    console.log("Balance");
+    console.log("-------");
+    const formatted = formatBalanceInfo(balanceInfo);
+    if (formatted.lines) {
+      formatted.lines.forEach((line) => console.log(line));
+    } else {
+      console.log(formatted.text);
+    }
+  } catch (error) {
+    console.log("Balance");
+    console.log("-------");
+    console.log(`Balance unavailable: ${error.message}`);
+  }
+}
+
+async function showDepositInfo(serverUrl, apiKey, privateKey, publicKeyBase64) {
+  try {
+    const depositInfo = await fetchDepositInfo(
+      serverUrl,
+      apiKey,
+      privateKey,
+      publicKeyBase64
+    );
+    console.log("");
+    console.log("Deposit Instructions");
+    console.log("--------------------");
+    if (depositInfo.network) console.log(`Network:  ${depositInfo.network}`);
+    if (depositInfo.currency) console.log(`Currency: ${depositInfo.currency}`);
+    if (depositInfo.deposit_wallet || depositInfo.deposit_address || depositInfo.address) {
+      console.log(
+        `Deposit:  ${
+          depositInfo.deposit_wallet || depositInfo.deposit_address || depositInfo.address
+        }`
+      );
+    }
+    if (depositInfo.instructions) {
+      console.log("");
+      console.log(depositInfo.instructions);
+    }
+    if (depositInfo.note) {
+      console.log("");
+      console.log(`Note: ${depositInfo.note}`);
+    }
+
+    const depositAddress =
+      depositInfo.deposit_wallet || depositInfo.deposit_address || depositInfo.address || "";
+    if (depositAddress) {
+      console.log("");
+      printQrCode(depositAddress);
+    }
+  } catch (error) {
+    console.log("");
+    console.log(`Deposit info unavailable: ${error.message}`);
+  }
+}
+
+async function showBalanceAndDeposit(serverUrl, apiKey, privateKey, publicKeyBase64) {
+  await showBalanceInfo(serverUrl, apiKey, privateKey, publicKeyBase64);
+  await showDepositInfo(serverUrl, apiKey, privateKey, publicKeyBase64);
+}
+
+function formatBalanceInfo(balanceInfo) {
+  if (balanceInfo == null) return { text: "Unknown" };
+  if (typeof balanceInfo === "number" || typeof balanceInfo === "string") {
+    return { text: String(balanceInfo) };
+  }
+  if (typeof balanceInfo === "object") {
+    const amount =
+      balanceInfo.balance ??
+      balanceInfo.available_balance ??
+      balanceInfo.available ??
+      balanceInfo.amount ??
+      balanceInfo.value;
+    const currency = balanceInfo.currency || balanceInfo.unit || "";
+    if (amount !== undefined && amount !== null) {
+      const text = currency ? `${amount} ${currency}` : String(amount);
+      return { text };
+    }
+    return { lines: JSON.stringify(balanceInfo, null, 2).split("\n") };
+  }
+  return { text: String(balanceInfo) };
+}
+
+function printQrCode(value) {
+  if (!value) return;
+  if (tryPrintQrencode(value)) return;
+  const url = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(
+    value
+  )}`;
+  console.log("QR Code (URL)");
+  console.log(url);
+}
+
+function tryPrintQrencode(value) {
+  const result = spawnSync(
+    "qrencode",
+    ["-t", "ANSIUTF8", "-o", "-", "-m", "1", value],
+    { encoding: "utf-8" }
+  );
+  if (result.error || result.status !== 0) return false;
+  if (!result.stdout) return false;
+  console.log("QR Code");
+  console.log("-------");
+  console.log(result.stdout);
+  return true;
 }
 
 function normalizeModelList(data) {

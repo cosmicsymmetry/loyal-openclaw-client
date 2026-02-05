@@ -22,8 +22,8 @@ The setup uses the hosted Loyal-OpenClaw server by default (no URL needed).
 
 - Generates or reuses an Ed25519 keypair in `~/.loyal-openclaw/`
 - Registers your public key with the server
-- Optionally sets your Solana wallet for deposits
 - Shows deposit instructions
+- Prints a QR code for the deposit address
 - Creates a Bearer API key (shown once)
 - Configures your OpenClaw provider config (and `~/.openclaw/.env`)
 
@@ -47,3 +47,4 @@ The setup uses the hosted Loyal-OpenClaw server by default (no URL needed).
 - This script uses Node only (no Bun required).
 - The Bearer API key is shown once and stored locally.
 - OpenClaw changes are reversible by removing the Loyal provider entries and LOYAL_API_KEY.
+- Rerunning the setup when a configuration already exists lets you check balance and view the deposit address.
