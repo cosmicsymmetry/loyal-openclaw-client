@@ -27,6 +27,15 @@ In practice, a TEE provides:
 3. The Loyal-OpenClaw service runs inside a TEE, keeping private data accessible only within the enclave.
 4. You receive deposit instructions and a one-time API key for OpenClaw configuration.
 
+## Pricing
+
+- **Input tokens:** $0.11 per 1M tokens
+- **Output tokens:** $0.55 per 1M tokens
+
+## Deposits
+
+When you run the setup script, you will be given a Solana (Sol) deposit address. Currently, only USDC is accepted for deposits.
+
 ## One-liner setup (recommended)
 
 Requires Node.js 18+.
@@ -67,3 +76,8 @@ The setup uses the hosted Loyal-OpenClaw server by default (no URL needed).
 - The Bearer API key is shown once. It's stored in OpenClaw config/.env if you configure OpenClaw.
 - OpenClaw changes are reversible by removing the Loyal provider entries and LOYAL_API_KEY.
 - Rerunning the setup when a configuration already exists lets you check balance and view the deposit address.
+
+## Support
+
+Email: rodion@askloyal.com  
+Telegram: [t.me/spacesymmetry](https://t.me/spacesymmetry)
