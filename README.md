@@ -1,12 +1,13 @@
 # Loyal OpenClaw Client
 
-Private OpenClaw integration that runs in a Trusted Execution Environment (TEE).
+Private OpenClaw integration that adds TEE-backed LLMs into the list of available providers.
+No sign up is required, everything works from your terminal.
 
-This repo provides a public, Node-only setup script for Loyal-OpenClaw users. It is designed for fully private usage: keys and sensitive data are isolated inside a TEE, so only the enclave can access them.
+This repo provides a public, Node-only setup script.
 
 ## Why use this integration
 
-- **Fully private by design.** Secrets are confined to a hardware-backed TEE, not exposed to the host OS or other processes.
+- **Fully private by design.** LLMs are confined to a hardware-backed TEE, not exposed to the host OS or other processes.
 - **Confidential computing.** Workloads run in an isolated enclave that protects data in use.
 - **Simple setup.** One command to register keys, create an API key, and configure OpenClaw.
 
@@ -24,11 +25,13 @@ In practice, a TEE provides:
 
 1. You run the setup script locally.
 2. A keypair is generated or reused and your public key is registered.
-3. The Loyal-OpenClaw service runs inside a TEE, keeping private data accessible only within the enclave.
-4. You receive deposit instructions and a one-time API key for OpenClaw configuration.
+3. You deposit USDC and get API key for OpenClaw configuration.
 
 ## Pricing
 
+This release currently supports only ChatGPT OSS 120b model. Expect more coming soon.
+
+Curent pricing:
 - **Input tokens:** $0.11 per 1M tokens
 - **Output tokens:** $0.55 per 1M tokens
 
@@ -43,8 +46,6 @@ Requires Node.js 18+.
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cosmicsymmetry/loyal-openclaw-client/main/loyal-openclaw-setup.js | node
 ```
-
-The setup uses the hosted Loyal-OpenClaw server by default (no URL needed).
 
 ## What it does
 
