@@ -184,7 +184,7 @@ async function chooseSetupMode(rl) {
   console.log("Existing setup detected. What would you like to do?");
   console.log("  1. Configure everything from the beginning");
   console.log("  2. Update OpenClaw provider models list only");
-  console.log("  3. Check balance and deposit address");
+  console.log("  3. Check balance, usage, and deposit address");
   while (true) {
     const answer = (await ask(rl, "Select 1, 2, or 3", "2")).trim();
     if (answer === "1") return "full";
@@ -298,6 +298,32 @@ async function fetchDepositInfo(serverUrl, apiKey, privateKey, publicKeyBase64) 
   throw new Error("No authentication available for deposit info.");
 }
 
+async function fetchUsageInfo(serverUrl, apiKey, privateKey, publicKeyBase64, limit = 20) {
+  const path = `/v1/usage?limit=${limit}`;
+
+  if (privateKey && publicKeyBase64) {
+    try {
+      return await signedJsonRequest(serverUrl, privateKey, publicKeyBase64, "GET", path);
+    } catch (error) {
+      if (!apiKey) throw error;
+    }
+  }
+
+  if (apiKey) {
+    const url = joinUrl(serverUrl, path);
+    const response = await fetchJson(url, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (!response.ok) {
+      throw new Error(formatError(response.data));
+    }
+    return response.data;
+  }
+
+  throw new Error("No authentication available for usage info.");
+}
+
 async function showBalanceInfo(serverUrl, apiKey, privateKey, publicKeyBase64) {
   try {
     const balanceInfo = await fetchBalanceInfo(serverUrl, apiKey, privateKey, publicKeyBase64);
@@ -316,6 +342,42 @@ async function showBalanceInfo(serverUrl, apiKey, privateKey, publicKeyBase64) {
   }
 }
 
+async function showUsageInfo(serverUrl, apiKey, privateKey, publicKeyBase64) {
+  try {
+    const usageInfo = await fetchUsageInfo(serverUrl, apiKey, privateKey, publicKeyBase64, 20);
+    console.log("");
+    console.log("Usage");
+    console.log("-----");
+    if (usageInfo?.totals) {
+      console.log(`Tokens in:  ${usageInfo.totals.tokens_in}`);
+      console.log(`Tokens out: ${usageInfo.totals.tokens_out}`);
+      console.log(`Cost:       ${usageInfo.totals.cost_usdc} USDC`);
+    }
+    if (Array.isArray(usageInfo?.usage) && usageInfo.usage.length) {
+      console.log("");
+      usageInfo.usage.forEach((entry) => {
+        const when = entry.created_at
+          ? new Date(entry.created_at * 1000).toISOString()
+          : "unknown";
+        const model = entry.model || "unknown";
+        const tokensIn = entry.tokens_in ?? 0;
+        const tokensOut = entry.tokens_out ?? 0;
+        const cost = entry.cost_usdc || entry.cost_wei || "0";
+        console.log(
+          `${when} | ${model} | in ${tokensIn} / out ${tokensOut} | ${cost} USDC`
+        );
+      });
+    } else {
+      console.log("No usage recorded yet.");
+    }
+  } catch (error) {
+    console.log("");
+    console.log("Usage");
+    console.log("-----");
+    console.log(`Usage unavailable: ${error.message}`);
+  }
+}
+
 async function showDepositInfo(serverUrl, apiKey, privateKey, publicKeyBase64) {
   try {
     const depositInfo = await fetchDepositInfo(
@@ -329,10 +391,18 @@ async function showDepositInfo(serverUrl, apiKey, privateKey, publicKeyBase64) {
     console.log("--------------------");
     if (depositInfo.network) console.log(`Network:  ${depositInfo.network}`);
     if (depositInfo.currency) console.log(`Currency: ${depositInfo.currency}`);
-    if (depositInfo.deposit_wallet || depositInfo.deposit_address || depositInfo.address) {
+    if (
+      depositInfo.deposit_account ||
+      depositInfo.deposit_wallet ||
+      depositInfo.deposit_address ||
+      depositInfo.address
+    ) {
       console.log(
         `Deposit:  ${
-          depositInfo.deposit_wallet || depositInfo.deposit_address || depositInfo.address
+          depositInfo.deposit_account ||
+          depositInfo.deposit_wallet ||
+          depositInfo.deposit_address ||
+          depositInfo.address
         }`
       );
     }
@@ -346,7 +416,11 @@ async function showDepositInfo(serverUrl, apiKey, privateKey, publicKeyBase64) {
     }
 
     const depositAddress =
-      depositInfo.deposit_wallet || depositInfo.deposit_address || depositInfo.address || "";
+      depositInfo.deposit_account ||
+      depositInfo.deposit_wallet ||
+      depositInfo.deposit_address ||
+      depositInfo.address ||
+      "";
     if (depositAddress) {
       console.log("");
       printQrCode(depositAddress);
@@ -359,6 +433,7 @@ async function showDepositInfo(serverUrl, apiKey, privateKey, publicKeyBase64) {
 
 async function showBalanceAndDeposit(serverUrl, apiKey, privateKey, publicKeyBase64) {
   await showBalanceInfo(serverUrl, apiKey, privateKey, publicKeyBase64);
+  await showUsageInfo(serverUrl, apiKey, privateKey, publicKeyBase64);
   await showDepositInfo(serverUrl, apiKey, privateKey, publicKeyBase64);
 }
 
@@ -368,17 +443,25 @@ function formatBalanceInfo(balanceInfo) {
     return { text: String(balanceInfo) };
   }
   if (typeof balanceInfo === "object") {
-    const amount =
-      balanceInfo.balance ??
-      balanceInfo.available_balance ??
-      balanceInfo.available ??
-      balanceInfo.amount ??
-      balanceInfo.value;
-    const currency = balanceInfo.currency || balanceInfo.unit || "";
-    if (amount !== undefined && amount !== null) {
-      const text = currency ? `${amount} ${currency}` : String(amount);
-      return { text };
+    const lines = [];
+    if (balanceInfo.balance_usdc !== undefined) {
+      lines.push(`Balance: ${balanceInfo.balance_usdc} USDC`);
+    } else {
+      const amount =
+        balanceInfo.balance ??
+        balanceInfo.available_balance ??
+        balanceInfo.available ??
+        balanceInfo.amount ??
+        balanceInfo.value;
+      const currency = balanceInfo.currency || balanceInfo.unit || "";
+      if (amount !== undefined && amount !== null) {
+        lines.push(currency ? `Balance: ${amount} ${currency}` : `Balance: ${amount}`);
+      }
     }
+    if (balanceInfo.user_id) lines.push(`User ID: ${balanceInfo.user_id}`);
+    if (balanceInfo.deposit_account) lines.push(`Deposit: ${balanceInfo.deposit_account}`);
+    if (balanceInfo.solana_wallet) lines.push(`Wallet: ${balanceInfo.solana_wallet} (optional)`);
+    if (lines.length) return { lines };
     return { lines: JSON.stringify(balanceInfo, null, 2).split("\n") };
   }
   return { text: String(balanceInfo) };
